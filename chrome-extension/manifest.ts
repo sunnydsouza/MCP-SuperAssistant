@@ -47,6 +47,7 @@ const manifest = {
     '*://*.kimi.com/*',
     '*://*.chat.z.ai/*',
     '*://*.chat.qwen.ai/*',
+    '*://m365.cloud.microsoft/*',
 
   ],
 
@@ -160,6 +161,12 @@ const manifest = {
     },
     {
       matches: ['*://*.chat.qwen.ai/*'],
+      js: ['content/index.iife.js'],
+      run_at: 'document_idle',
+    },
+    // Specific content script for Microsoft 365 Copilot Chat
+    {
+      matches: ['*://m365.cloud.microsoft/*'],
       js: ['content/index.iife.js'],
       run_at: 'document_idle',
     },
