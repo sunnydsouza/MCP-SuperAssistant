@@ -77,12 +77,13 @@ export class Microsoft365CopilotAdapter extends BaseAdapterPlugin {
 
       const existing = this.readEditorValue(input);
       const separator = existing.length > 0 && !existing.endsWith('\n') ? '\n' : '';
-      const nextValue = `${existing}${separator}${text}`;
+      const appendedText = `${separator}${text}`;
+      const nextValue = `${existing}${appendedText}`;
 
       if (input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement) {
         this.setNativeInputValue(input, nextValue);
       } else if (input.isContentEditable) {
-        this.setContentEditableValue(input, nextValue, text);
+        this.appendToContentEditable(input, appendedText, nextValue);
       } else {
         this.emitFailed('insertText', `Unsupported prompt editor element: ${input.tagName}`);
         return false;
@@ -109,42 +110,17 @@ export class Microsoft365CopilotAdapter extends BaseAdapterPlugin {
         return true;
       }
 
-      const form = options?.formElement ?? input?.closest('form');
+      const enclosingForm = input?.closest('form') as HTMLFormElement | null;
+      const form = options?.formElement ?? enclosingForm;
       if (form) {
         form.requestSubmit();
         this.emitCompleted('submitForm', {}, { success: true, method: 'requestSubmit' });
         return true;
       }
 
-      // M365 Copilot normally exposes a Send button. Use Enter only as a final
-      // fallback and verify that the event was not cancelled by the editor.
-      if (input) {
-        input.focus();
-        const keydown = new KeyboardEvent('keydown', {
-          key: 'Enter',
-          code: 'Enter',
-          keyCode: 13,
-          which: 13,
-          bubbles: true,
-          cancelable: true,
-        });
-        const accepted = input.dispatchEvent(keydown);
-        input.dispatchEvent(
-          new KeyboardEvent('keyup', {
-            key: 'Enter',
-            code: 'Enter',
-            keyCode: 13,
-            which: 13,
-            bubbles: true,
-          }),
-        );
-
-        if (accepted) {
-          this.emitCompleted('submitForm', {}, { success: true, method: 'enter-key-fallback' });
-          return true;
-        }
-      }
-
+      // Do not synthesize an Enter key here. Browser-generated keyboard default
+      // actions do not run for untrusted synthetic events, so reporting success
+      // would be misleading. M365 normally exposes an accessible Send button.
       this.emitFailed('submitForm', 'Microsoft 365 Copilot Send button or form was not found');
       return false;
     } catch (error) {
@@ -226,11 +202,10 @@ export class Microsoft365CopilotAdapter extends BaseAdapterPlugin {
     element.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
-  private setContentEditableValue(element: HTMLElement, value: string, insertedText: string): void {
-    // Lexical/React editors react most reliably when the DOM mutation is followed
-    // by a native input event. Keep the caret at the end for the user's next edit.
-    element.textContent = value;
-
+  private appendToContentEditable(element: HTMLElement, appendedText: string, fallbackValue: string): void {
+    // Put the caret at the end first. execCommand is deprecated for general web
+    // development, but remains useful for browser extensions because it asks the
+    // active rich-text editor to perform an edit instead of only mutating its DOM.
     const range = document.createRange();
     range.selectNodeContents(element);
     range.collapse(false);
@@ -238,7 +213,23 @@ export class Microsoft365CopilotAdapter extends BaseAdapterPlugin {
     selection?.removeAllRanges();
     selection?.addRange(range);
 
-    element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: insertedText }));
+    let inserted = false;
+    try {
+      inserted = document.execCommand('insertText', false, appendedText);
+    } catch {
+      inserted = false;
+    }
+
+    if (!inserted) {
+      element.textContent = fallbackValue;
+      const fallbackRange = document.createRange();
+      fallbackRange.selectNodeContents(element);
+      fallbackRange.collapse(false);
+      selection?.removeAllRanges();
+      selection?.addRange(fallbackRange);
+      element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: appendedText }));
+    }
+
     element.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
