@@ -16,6 +16,7 @@ export { T3ChatAdapter } from './adapters/t3chat.adapter';
 export { AIStudioAdapter } from './adapters/aistudio.adapter';
 export { MistralAdapter } from './adapters/mistral.adapter';
 export { GitHubCopilotAdapter } from './adapters/ghcopilot.adapter';
+export { Microsoft365CopilotAdapter } from './adapters/m365copilot.adapter';
 export { SidebarPlugin } from './sidebar.plugin';
 export { createPluginContext } from './plugin-context';
 
