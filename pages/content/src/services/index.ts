@@ -21,6 +21,12 @@ export async function initializeAllServices(): Promise<void> {
   logger.debug('[Services] Initializing all application services...');
   
   try {
+    // Register/activate the Microsoft 365 Copilot adapter after the core plugin
+    // registry has initialized. This uses the same lazy adapter factory mechanism
+    // as the built-in site adapters.
+    const { initializeMicrosoft365CopilotSupport } = await import('../plugins/m365copilot-registration');
+    await initializeMicrosoft365CopilotSupport();
+
     // Initialize automation service
     const { initializeAutomationService } = await import('./automation.service');
     initializeAutomationService();
