@@ -27,7 +27,7 @@ export async function initializeMicrosoft365CopilotSupport(): Promise<void> {
       id: 'm365-copilot-adapter',
       name: 'Microsoft Copilot Adapter',
       description: 'Adapter for Microsoft Copilot Chat on copilot.cloud.microsoft and m365.cloud.microsoft',
-      version: '1.0.1',
+      version: '1.1.0',
       enabled: true,
       priority: 10,
       settings: {
