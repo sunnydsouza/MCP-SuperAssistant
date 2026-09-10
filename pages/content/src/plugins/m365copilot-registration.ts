@@ -1,8 +1,22 @@
 import { pluginRegistry } from './plugin-registry';
 import { Microsoft365CopilotAdapter } from './adapters/m365copilot.adapter';
+import { addMicrosoftCopilotBridgeInstructions } from './m365copilot-instructions';
 import { createLogger } from '@extension/shared/lib/logger';
 
 const logger = createLogger('Microsoft365CopilotRegistration');
+
+/**
+ * Microsoft Copilot distinguishes its native tool registry from capabilities
+ * described in ordinary chat text. MCP SuperAssistant is an external browser
+ * bridge, so make that distinction explicit only when inserting the generated
+ * SuperAssistant instruction prompt. Function results and normal text are left
+ * untouched.
+ */
+class Microsoft365CopilotBridgeAdapter extends Microsoft365CopilotAdapter {
+  override async insertText(text: string, options?: { targetElement?: HTMLElement }): Promise<boolean> {
+    return super.insertText(addMicrosoftCopilotBridgeInstructions(text), options);
+  }
+}
 
 /**
  * Register Microsoft Copilot after the core registry has initialized.
@@ -23,11 +37,11 @@ export async function initializeMicrosoft365CopilotSupport(): Promise<void> {
   const pluginName = 'Microsoft365CopilotAdapter';
 
   if (!pluginRegistry.isPluginRegistered(pluginName)) {
-    await pluginRegistry.register(new Microsoft365CopilotAdapter(), {
+    await pluginRegistry.register(new Microsoft365CopilotBridgeAdapter(), {
       id: 'm365-copilot-adapter',
       name: 'Microsoft Copilot Adapter',
       description: 'Adapter for Microsoft Copilot Chat on copilot.cloud.microsoft and m365.cloud.microsoft',
-      version: '1.1.0',
+      version: '1.1.1',
       enabled: true,
       priority: 10,
       settings: {
