@@ -5,17 +5,17 @@ import { createLogger } from '@extension/shared/lib/logger';
 const logger = createLogger('Microsoft365CopilotAdapter');
 
 /**
- * Adapter for Microsoft 365 Copilot Chat (m365.cloud.microsoft).
+ * Adapter for Microsoft Copilot Chat / Microsoft 365 Copilot.
  *
- * Microsoft changes generated class names frequently, so this adapter deliberately
- * prefers stable accessibility attributes and semantic editor attributes instead of
- * private CSS classes. It supports both textarea-based and Lexical/contenteditable
- * prompt editors used by Microsoft 365 Copilot Chat.
+ * Microsoft currently exposes the experience on both copilot.cloud.microsoft
+ * and m365.cloud.microsoft depending on entry point and tenant routing.
+ * Generated class names change frequently, so this adapter deliberately
+ * prefers stable accessibility attributes and semantic editor attributes.
  */
 export class Microsoft365CopilotAdapter extends BaseAdapterPlugin {
   readonly name = 'Microsoft365CopilotAdapter';
-  readonly version = '1.0.0';
-  readonly hostnames = ['m365.cloud.microsoft'];
+  readonly version = '1.0.1';
+  readonly hostnames = ['copilot.cloud.microsoft', 'm365.cloud.microsoft'];
   readonly capabilities: AdapterCapability[] = ['text-insertion', 'form-submission', 'dom-manipulation'];
 
   private readonly inputSelectors = [
@@ -40,35 +40,40 @@ export class Microsoft365CopilotAdapter extends BaseAdapterPlugin {
 
   async initialize(context: PluginContext): Promise<void> {
     await super.initialize(context);
-    this.context.logger.debug('Microsoft 365 Copilot adapter initialized');
+    this.context.logger.debug('Microsoft Copilot adapter initialized');
   }
 
   async activate(): Promise<void> {
     if (this.currentStatus === 'active') return;
     await super.activate();
-    this.context.logger.debug('Microsoft 365 Copilot adapter activated');
+    this.context.logger.debug('Microsoft Copilot adapter activated');
   }
 
   async deactivate(): Promise<void> {
     if (this.currentStatus === 'inactive' || this.currentStatus === 'disabled') return;
     await super.deactivate();
-    this.context.logger.debug('Microsoft 365 Copilot adapter deactivated');
+    this.context.logger.debug('Microsoft Copilot adapter deactivated');
   }
 
   async cleanup(): Promise<void> {
     await super.cleanup();
-    this.context.logger.debug('Microsoft 365 Copilot adapter cleaned up');
+    this.context.logger.debug('Microsoft Copilot adapter cleaned up');
   }
 
   isSupported(): boolean {
     const hostname = window.location.hostname.toLowerCase();
-    return hostname === 'm365.cloud.microsoft' || hostname.endsWith('.m365.cloud.microsoft');
+    return (
+      hostname === 'copilot.cloud.microsoft' ||
+      hostname === 'm365.cloud.microsoft' ||
+      hostname.endsWith('.copilot.cloud.microsoft') ||
+      hostname.endsWith('.m365.cloud.microsoft')
+    );
   }
 
   async insertText(text: string, options?: { targetElement?: HTMLElement }): Promise<boolean> {
     const input = options?.targetElement ?? this.findPromptInput();
     if (!input) {
-      this.emitFailed('insertText', 'Microsoft 365 Copilot prompt editor was not found');
+      this.emitFailed('insertText', 'Microsoft Copilot prompt editor was not found');
       return false;
     }
 
@@ -93,7 +98,7 @@ export class Microsoft365CopilotAdapter extends BaseAdapterPlugin {
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logger.error('Failed to insert text into Microsoft 365 Copilot:', error);
+      logger.error('Failed to insert text into Microsoft Copilot:', error);
       this.emitFailed('insertText', message);
       return false;
     }
@@ -118,14 +123,11 @@ export class Microsoft365CopilotAdapter extends BaseAdapterPlugin {
         return true;
       }
 
-      // Do not synthesize an Enter key here. Browser-generated keyboard default
-      // actions do not run for untrusted synthetic events, so reporting success
-      // would be misleading. M365 normally exposes an accessible Send button.
-      this.emitFailed('submitForm', 'Microsoft 365 Copilot Send button or form was not found');
+      this.emitFailed('submitForm', 'Microsoft Copilot Send button or form was not found');
       return false;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logger.error('Failed to submit Microsoft 365 Copilot prompt:', error);
+      logger.error('Failed to submit Microsoft Copilot prompt:', error);
       this.emitFailed('submitForm', message);
       return false;
     }
@@ -153,8 +155,6 @@ export class Microsoft365CopilotAdapter extends BaseAdapterPlugin {
       }
     }
 
-    // Accessible-name fallback for UI variants that do not expose one of the
-    // stable data-testid/title attributes above.
     for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>('button'))) {
       if (candidates.includes(button) || !this.isClickable(button)) continue;
       const label = `${button.getAttribute('aria-label') ?? ''} ${button.getAttribute('title') ?? ''} ${button.textContent ?? ''}`.trim();
@@ -203,9 +203,6 @@ export class Microsoft365CopilotAdapter extends BaseAdapterPlugin {
   }
 
   private appendToContentEditable(element: HTMLElement, appendedText: string, fallbackValue: string): void {
-    // Put the caret at the end first. execCommand is deprecated for general web
-    // development, but remains useful for browser extensions because it asks the
-    // active rich-text editor to perform an edit instead of only mutating its DOM.
     const range = document.createRange();
     range.selectNodeContents(element);
     range.collapse(false);
