@@ -26,8 +26,11 @@ let bridgeObserver: MutationObserver | null = null;
 let bridgePollTimer: ReturnType<typeof setInterval> | null = null;
 let scanTimer: ReturnType<typeof setTimeout> | null = null;
 let initialized = false;
+let bridgeSequence = 0;
 
-const renderedSignatures = new Set<string>();
+// Track DOM instances rather than only protocol text. Copilot can legitimately
+// emit the exact same function request more than once in one conversation.
+const processedAnchors = new WeakSet<HTMLElement>();
 
 type SearchRoot = Document | ShadowRoot;
 
@@ -151,18 +154,14 @@ function findOuterCodeAnchor(source: HTMLElement): HTMLElement {
   return semanticAnchor ?? source;
 }
 
-function mountSyntheticFunctionBlock(source: HTMLElement, normalizedProtocol: string): boolean {
-  const signature = signatureFor(normalizedProtocol);
-  if (renderedSignatures.has(signature)) return false;
+function mountSyntheticFunctionBlock(anchor: HTMLElement, normalizedProtocol: string): boolean {
+  if (processedAnchors.has(anchor) || anchor.hasAttribute(SOURCE_ATTRIBUTE)) return false;
 
-  const existing = document.querySelector<HTMLElement>(`[${BRIDGE_HOST_ATTRIBUTE}="${signature}"]`);
-  if (existing) {
-    renderedSignatures.add(signature);
-    return false;
-  }
+  const signature = signatureFor(normalizedProtocol);
+  const bridgeId = `${signature}-${++bridgeSequence}`;
 
   const bridgeHost = document.createElement('div');
-  bridgeHost.setAttribute(BRIDGE_HOST_ATTRIBUTE, signature);
+  bridgeHost.setAttribute(BRIDGE_HOST_ATTRIBUTE, bridgeId);
   bridgeHost.style.display = 'block';
   bridgeHost.style.width = '100%';
   bridgeHost.style.margin = '8px 0';
@@ -172,7 +171,7 @@ function mountSyntheticFunctionBlock(source: HTMLElement, normalizedProtocol: st
   syntheticPre.setAttribute('data-mcp-m365-normalized-protocol', 'true');
   bridgeHost.appendChild(syntheticPre);
 
-  const root = source.getRootNode();
+  const root = anchor.getRootNode();
 
   if (root instanceof ShadowRoot) {
     const shadowHost = root.host as HTMLElement;
@@ -181,13 +180,10 @@ function mountSyntheticFunctionBlock(source: HTMLElement, normalizedProtocol: st
     } else {
       document.body.appendChild(bridgeHost);
     }
+  } else if (anchor.parentElement) {
+    anchor.insertAdjacentElement('afterend', bridgeHost);
   } else {
-    const anchor = findOuterCodeAnchor(source);
-    if (anchor.parentElement) {
-      anchor.insertAdjacentElement('afterend', bridgeHost);
-    } else {
-      document.body.appendChild(bridgeHost);
-    }
+    document.body.appendChild(bridgeHost);
   }
 
   const rendered = renderFunctionCall(syntheticPre, { current: false });
@@ -197,22 +193,30 @@ function mountSyntheticFunctionBlock(source: HTMLElement, normalizedProtocol: st
     return false;
   }
 
-  source.setAttribute(SOURCE_ATTRIBUTE, signature);
-  renderedSignatures.add(signature);
-  logger.info(`Rendered Microsoft Copilot MCP function request through fallback bridge (${signature})`);
+  anchor.setAttribute(SOURCE_ATTRIBUTE, bridgeId);
+  processedAnchors.add(anchor);
+  logger.info(`Rendered Microsoft Copilot MCP function request through fallback bridge (${bridgeId})`);
   return true;
 }
 
 function scanRoot(root: SearchRoot): number {
   let rendered = 0;
+  const candidates = new Map<HTMLElement, string>();
 
   for (const source of collectProtocolSources(root)) {
+    const anchor = findOuterCodeAnchor(source);
+    if (processedAnchors.has(anchor) || anchor.hasAttribute(SOURCE_ATTRIBUTE)) continue;
+
     const normalized = normalizeFunctionProtocol(source.textContent ?? '');
     if (!normalized) continue;
 
-    if (mountSyntheticFunctionBlock(source, normalized)) {
-      rendered += 1;
-    }
+    // Nested <pre>/<code>/Monaco selectors commonly point at the same code
+    // artifact. Key by the outer anchor so one Copilot response gets one Run card.
+    if (!candidates.has(anchor)) candidates.set(anchor, normalized);
+  }
+
+  for (const [anchor, normalized] of candidates) {
+    if (mountSyntheticFunctionBlock(anchor, normalized)) rendered += 1;
   }
 
   return rendered;
@@ -245,24 +249,26 @@ function scanSameOriginFrames(): number {
       const frameDocument = iframe.contentDocument;
       if (!frameDocument?.body) continue;
 
-      // We cannot safely mount the standard renderer inside another document
-      // because it uses the content script's global document. Detect a protocol
-      // there and copy only its normalized text back to a bridge host after the
-      // iframe in the top-level document.
       for (const source of collectProtocolSources(frameDocument)) {
+        const frameAnchor = findOuterCodeAnchor(source);
+        if (processedAnchors.has(frameAnchor) || frameAnchor.hasAttribute(SOURCE_ATTRIBUTE)) continue;
+
         const normalized = normalizeFunctionProtocol(source.textContent ?? '');
         if (!normalized) continue;
 
-        const signature = signatureFor(normalized);
-        if (renderedSignatures.has(signature)) continue;
+        // The standard renderer is bound to the top-level content script's
+        // document. Proxy only the normalized protocol back beside the iframe.
+        const proxyAnchor = document.createElement('span');
+        proxyAnchor.style.display = 'none';
+        iframe.insertAdjacentElement('afterend', proxyAnchor);
+        const didRender = mountSyntheticFunctionBlock(proxyAnchor, normalized);
+        proxyAnchor.remove();
 
-        const proxySource = document.createElement('span');
-        proxySource.style.display = 'none';
-        proxySource.textContent = normalized;
-        iframe.insertAdjacentElement('afterend', proxySource);
-        const didRender = mountSyntheticFunctionBlock(proxySource, normalized);
-        proxySource.remove();
-        if (didRender) rendered += 1;
+        if (didRender) {
+          frameAnchor.setAttribute(SOURCE_ATTRIBUTE, signatureFor(normalized));
+          processedAnchors.add(frameAnchor);
+          rendered += 1;
+        }
       }
     } catch {
       // Cross-origin frame. The top-level content script cannot inspect it.
