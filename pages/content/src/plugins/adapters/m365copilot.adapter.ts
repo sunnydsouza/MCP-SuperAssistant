@@ -10,11 +10,12 @@ const logger = createLogger('Microsoft365CopilotAdapter');
  * Microsoft currently exposes the experience on both copilot.cloud.microsoft
  * and m365.cloud.microsoft depending on entry point and tenant routing.
  * Generated class names change frequently, so this adapter deliberately
- * prefers stable accessibility attributes and semantic editor attributes.
+ * prefers stable accessibility attributes, semantic editor attributes and
+ * geometry-based fallbacks around the composer.
  */
 export class Microsoft365CopilotAdapter extends BaseAdapterPlugin {
   readonly name = 'Microsoft365CopilotAdapter';
-  readonly version = '1.0.1';
+  readonly version = '1.1.0';
   readonly hostnames = ['copilot.cloud.microsoft', 'm365.cloud.microsoft'];
   readonly capabilities: AdapterCapability[] = ['text-insertion', 'form-submission', 'dom-manipulation'];
 
@@ -38,6 +39,11 @@ export class Microsoft365CopilotAdapter extends BaseAdapterPlugin {
     'button[type="submit"]',
   ];
 
+  private mcpPopoverContainer: HTMLElement | null = null;
+  private mcpPopoverRoot: { unmount?: () => void } | null = null;
+  private mutationObserver: MutationObserver | null = null;
+  private injectionTimer: ReturnType<typeof setTimeout> | null = null;
+
   async initialize(context: PluginContext): Promise<void> {
     await super.initialize(context);
     this.context.logger.debug('Microsoft Copilot adapter initialized');
@@ -47,15 +53,19 @@ export class Microsoft365CopilotAdapter extends BaseAdapterPlugin {
     if (this.currentStatus === 'active') return;
     await super.activate();
     this.context.logger.debug('Microsoft Copilot adapter activated');
+
+    this.setupComposerIntegration();
   }
 
   async deactivate(): Promise<void> {
     if (this.currentStatus === 'inactive' || this.currentStatus === 'disabled') return;
+    this.cleanupComposerIntegration();
     await super.deactivate();
     this.context.logger.debug('Microsoft Copilot adapter deactivated');
   }
 
   async cleanup(): Promise<void> {
+    this.cleanupComposerIntegration();
     await super.cleanup();
     this.context.logger.debug('Microsoft Copilot adapter cleaned up');
   }
@@ -131,6 +141,238 @@ export class Microsoft365CopilotAdapter extends BaseAdapterPlugin {
       this.emitFailed('submitForm', message);
       return false;
     }
+  }
+
+  /**
+   * The ChatGPT and GitHub Copilot adapters inject MCPPopover into the host
+   * composer. Do the same for Microsoft Copilot, but avoid depending on
+   * generated Fluent/Griffel class names.
+   */
+  private setupComposerIntegration(): void {
+    this.schedulePopoverInjection(100);
+
+    if (this.mutationObserver) return;
+
+    this.mutationObserver = new MutationObserver(() => {
+      const existing = document.getElementById('mcp-m365-popover-container');
+      if (!existing || !existing.isConnected) {
+        this.schedulePopoverInjection(250);
+      }
+    });
+
+    this.mutationObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  }
+
+  private schedulePopoverInjection(delay: number): void {
+    if (this.injectionTimer) return;
+
+    this.injectionTimer = setTimeout(() => {
+      this.injectionTimer = null;
+      void this.injectMCPPopoverWithRetry();
+    }, delay);
+  }
+
+  private async injectMCPPopoverWithRetry(maxAttempts = 12): Promise<void> {
+    if (document.getElementById('mcp-m365-popover-container')) return;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const insertionPoint = this.findButtonInsertionPoint();
+      if (insertionPoint) {
+        await this.injectMCPPopover(insertionPoint);
+        return;
+      }
+
+      await new Promise(resolve => setTimeout(resolve, attempt < 5 ? 300 : 750));
+    }
+
+    this.context.logger.warn('Microsoft Copilot composer found no safe insertion point for MCP button');
+  }
+
+  private findButtonInsertionPoint(): { container: Element; insertAfter: Element | null } | null {
+    const input = this.findPromptInput();
+    if (!input) return null;
+
+    const inputRect = input.getBoundingClientRect();
+    const inputCenterY = inputRect.top + inputRect.height / 2;
+
+    // Prefer semantically labelled Add/Attach buttons when Microsoft exposes
+    // an accessible name for the plus button.
+    const semanticSelectors = [
+      'button[aria-label*="attach" i]',
+      'button[title*="attach" i]',
+      'button[aria-label*="add" i]',
+      'button[title*="add" i]',
+      'button[data-testid*="attach" i]',
+      'button[data-testid*="add" i]',
+    ];
+
+    for (const selector of semanticSelectors) {
+      for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>(selector))) {
+        if (!this.isClickable(button)) continue;
+        const rect = button.getBoundingClientRect();
+        const centerY = rect.top + rect.height / 2;
+        if (Math.abs(centerY - inputCenterY) <= 100 && button.parentElement) {
+          return { container: button.parentElement, insertAfter: button };
+        }
+      }
+    }
+
+    // Geometry fallback: walk up from the editor until we find a composer-like
+    // container, then choose the closest visible button to the left of the editor.
+    let composer: HTMLElement | null = input.parentElement;
+    for (let depth = 0; composer && depth < 8; depth += 1, composer = composer.parentElement) {
+      const buttons = Array.from(composer.querySelectorAll<HTMLButtonElement>('button')).filter(button =>
+        this.isClickable(button),
+      );
+      if (buttons.length === 0) continue;
+
+      const leftCandidates = buttons
+        .map(button => ({ button, rect: button.getBoundingClientRect() }))
+        .filter(({ rect }) => {
+          const centerY = rect.top + rect.height / 2;
+          return Math.abs(centerY - inputCenterY) <= 110 && rect.left <= inputRect.left + 80;
+        })
+        .sort((a, b) => Math.abs(b.rect.right - inputRect.left) - Math.abs(a.rect.right - inputRect.left));
+
+      const plusLike = leftCandidates.find(({ button }) => {
+        const label = `${button.getAttribute('aria-label') ?? ''} ${button.getAttribute('title') ?? ''} ${button.textContent ?? ''}`.trim();
+        return /(^|\s)(add|attach|plus)(\s|$)/i.test(label) || button.textContent?.trim() === '+';
+      });
+
+      const candidate = plusLike?.button ?? leftCandidates[leftCandidates.length - 1]?.button;
+      if (candidate?.parentElement) {
+        return { container: candidate.parentElement, insertAfter: candidate };
+      }
+    }
+
+    // Last resort: place the MCP control immediately before the prompt editor.
+    if (input.parentElement) {
+      return { container: input.parentElement, insertAfter: null };
+    }
+
+    return null;
+  }
+
+  private async injectMCPPopover(insertionPoint: { container: Element; insertAfter: Element | null }): Promise<void> {
+    if (document.getElementById('mcp-m365-popover-container')) return;
+
+    const reactContainer = document.createElement('div');
+    reactContainer.id = 'mcp-m365-popover-container';
+    reactContainer.setAttribute('data-mcp-superassistant', 'm365-composer');
+    reactContainer.style.display = 'inline-flex';
+    reactContainer.style.alignItems = 'center';
+    reactContainer.style.flex = '0 0 auto';
+    reactContainer.style.margin = '0 4px';
+    reactContainer.style.position = 'relative';
+    reactContainer.style.zIndex = '2';
+
+    const { container, insertAfter } = insertionPoint;
+    if (insertAfter && insertAfter.parentNode === container) {
+      container.insertBefore(reactContainer, insertAfter.nextSibling);
+    } else if (container.firstChild) {
+      container.insertBefore(reactContainer, container.firstChild);
+    } else {
+      container.appendChild(reactContainer);
+    }
+
+    this.mcpPopoverContainer = reactContainer;
+
+    try {
+      const React = await import('react');
+      const ReactDOM = await import('react-dom/client');
+      const { MCPPopover } = await import('../../components/mcpPopover/mcpPopover');
+
+      if (!reactContainer.isConnected) return;
+
+      const toggleStateManager = this.createToggleStateManager();
+      const root = ReactDOM.createRoot(reactContainer);
+      this.mcpPopoverRoot = root;
+
+      root.render(
+        React.createElement(MCPPopover, {
+          toggleStateManager,
+          adapterName: this.name,
+        }),
+      );
+
+      this.context.logger.debug('MCP popover injected into Microsoft Copilot composer');
+    } catch (error) {
+      reactContainer.remove();
+      this.mcpPopoverContainer = null;
+      this.mcpPopoverRoot = null;
+      this.context.logger.error('Failed to render Microsoft Copilot MCP popover:', error);
+    }
+  }
+
+  private createToggleStateManager() {
+    const context = this.context;
+
+    const stateManager = {
+      getState: () => {
+        const uiState = context.stores.ui;
+        const preferences = uiState?.preferences ?? {};
+        return {
+          mcpEnabled: uiState?.mcpEnabled ?? true,
+          autoInsert: preferences.autoInsert ?? false,
+          autoSubmit: preferences.autoSubmit ?? false,
+          autoExecute: preferences.autoExecute ?? false,
+        };
+      },
+      setMCPEnabled: (enabled: boolean) => {
+        const uiState = context.stores.ui;
+        if (uiState?.setMCPEnabled) uiState.setMCPEnabled(enabled, 'm365-mcp-popover');
+        stateManager.updateUI();
+      },
+      setAutoInsert: (enabled: boolean) => {
+        context.stores.ui?.updatePreferences?.({ autoInsert: enabled });
+        stateManager.updateUI();
+      },
+      setAutoSubmit: (enabled: boolean) => {
+        context.stores.ui?.updatePreferences?.({ autoSubmit: enabled });
+        stateManager.updateUI();
+      },
+      setAutoExecute: (enabled: boolean) => {
+        context.stores.ui?.updatePreferences?.({ autoExecute: enabled });
+        stateManager.updateUI();
+      },
+      updateUI: () => {
+        const container = document.getElementById('mcp-m365-popover-container');
+        if (!container) return;
+        container.dispatchEvent(
+          new CustomEvent('mcp-toggle-state-updated', {
+            detail: stateManager.getState(),
+          }),
+        );
+      },
+    };
+
+    return stateManager;
+  }
+
+  private cleanupComposerIntegration(): void {
+    if (this.injectionTimer) {
+      clearTimeout(this.injectionTimer);
+      this.injectionTimer = null;
+    }
+
+    if (this.mutationObserver) {
+      this.mutationObserver.disconnect();
+      this.mutationObserver = null;
+    }
+
+    try {
+      this.mcpPopoverRoot?.unmount?.();
+    } catch (error) {
+      this.context.logger.warn('Failed to unmount Microsoft Copilot MCP popover:', error);
+    }
+    this.mcpPopoverRoot = null;
+
+    const container = this.mcpPopoverContainer ?? document.getElementById('mcp-m365-popover-container');
+    container?.remove();
+    this.mcpPopoverContainer = null;
   }
 
   private findPromptInput(): HTMLElement | null {
