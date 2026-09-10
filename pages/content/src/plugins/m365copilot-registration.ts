@@ -1,6 +1,7 @@
 import { pluginRegistry } from './plugin-registry';
 import { Microsoft365CopilotAdapter } from './adapters/m365copilot.adapter';
 import { addMicrosoftCopilotBridgeInstructions } from './m365copilot-instructions';
+import { initializeMicrosoftCopilotFunctionBridge } from './m365copilot-function-bridge';
 import { createLogger } from '@extension/shared/lib/logger';
 
 const logger = createLogger('Microsoft365CopilotRegistration');
@@ -206,7 +207,7 @@ export async function initializeMicrosoft365CopilotSupport(): Promise<void> {
       id: 'm365-copilot-adapter',
       name: 'Microsoft Copilot Adapter',
       description: 'Adapter for Microsoft Copilot Chat on copilot.cloud.microsoft and m365.cloud.microsoft',
-      version: '1.2.0',
+      version: '1.3.0',
       enabled: true,
       priority: 10,
       settings: {
@@ -217,5 +218,12 @@ export async function initializeMicrosoft365CopilotSupport(): Promise<void> {
   }
 
   await pluginRegistry.activatePlugin(pluginName);
+
+  // Microsoft currently renders some code blocks through a virtualized artifact
+  // viewer whose DOM shape is not stable enough for the generic CSS-selector
+  // renderer. This protocol-text bridge is deliberately M365-only and feeds a
+  // normalized copy of completed JSONL requests into the existing Run-card UI.
+  initializeMicrosoftCopilotFunctionBridge();
+
   logger.debug(`Microsoft Copilot adapter activated for ${hostname}`);
 }
