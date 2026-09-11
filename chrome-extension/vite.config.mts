@@ -17,11 +17,16 @@ export default defineConfig({
   },
   envPrefix: ['VITE_', 'CEB_'],
   resolve: {
-    alias: {
-      '@root': rootDir,
-      '@src': srcDir,
-      '@assets': resolve(srcDir, 'assets'),
-    },
+    // RegExp aliases require Vite's array form. These aliases keep Ajv runtime
+    // code generation out of the Chrome/Edge Manifest V3 service worker.
+    alias: [
+      { find: '@root', replacement: rootDir },
+      { find: '@src', replacement: srcDir },
+      { find: '@assets', replacement: resolve(srcDir, 'assets') },
+      { find: /^ajv-formats(\/.*)?$/, replacement: resolve(srcDir, 'shims', 'ajv-formats.ts') },
+      { find: 'ajv/dist/compile/codegen', replacement: resolve(srcDir, 'shims', 'ajv-codegen.ts') },
+      { find: /^ajv(\/.*)?$/, replacement: resolve(srcDir, 'shims', 'ajv.ts') },
+    ],
   },
   plugins: [
     libAssetsPlugin({

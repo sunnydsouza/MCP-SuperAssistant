@@ -15,6 +15,7 @@ export const DEFAULT_CONFIG: FunctionCallRendererConfig = {
     'shell',
     'css',
     'json',
+    'jsonl',
     'java',
     'c',
     'cpp',
@@ -61,159 +62,160 @@ export const WEBSITE_CONFIGS: Array<{
   urlPattern: string | RegExp;
   config: Partial<FunctionCallRendererConfig>;
 }> = [
-    {
-      // AI Studio specific configuration
-      urlPattern: 'aistudio',
-      config: {
-        targetSelectors: ['pre'],
-        streamingContainerSelectors: ['.pre'],
-        // <ms-prompt-chunk _ngcontent-ng-c1514118342="" _nghost-ng-c66683564="" class="text-chunk ng-star-inserted" id="68420A4A-417F-4A01-8BF8-EF77DFEC7182">
-        // <div _ngcontent-ng-c1514118342="" msheightchanged="" class="turn-content">
-        // <div _ngcontent-ng-c1514118342="" class="virtual-scroll-container user-prompt-container" data-turn-role="User">
-        // <ms-text-chunk _ngcontent-ng-c66683564="" _nghost-ng-c3631226313="" class="ng-star-inserted">
-        function_result_selector: ['ms-text-chunk.ng-star-inserted'],
-      },
+  {
+    // Microsoft Copilot uses a richer code-block editor for some languages (including
+    // jsonl, which it may render as Plain Text) instead of always emitting a native
+    // <pre>/<code> tree. Include Monaco-style line containers in addition to the
+    // normal targets so the JSONL execution-request emitted by Copilot is observed.
+    urlPattern: /(?:copilot|m365)\.cloud\.microsoft/,
+    config: {
+      targetSelectors: ['pre', 'code', '.monaco-editor .view-lines', '.view-lines', '[role="code"]'],
+      streamingContainerSelectors: ['pre', 'code', '.monaco-editor', '.view-lines', '[role="code"]'],
+      function_result_selector: [],
     },
-    {
-      urlPattern: 'perplexity',
-      config: {
-        targetSelectors: ['pre'],
-        streamingContainerSelectors: ['.pre'],
-        function_result_selector: ['div.group\\/query', '.group\\/query', 'div[class*="group/query"]'],
-      },
+  },
+  {
+    // AI Studio specific configuration
+    urlPattern: 'aistudio',
+    config: {
+      targetSelectors: ['pre'],
+      streamingContainerSelectors: ['.pre'],
+      // <ms-prompt-chunk _ngcontent-ng-c1514118342="" _nghost-ng-c66683564="" class="text-chunk ng-star-inserted" id="68420A4A-417F-4A01-8BF8-EF77DFEC7182">
+      // <div _ngcontent-ng-c1514118342="" msheightchanged="" class="turn-content">
+      // <div _ngcontent-ng-c1514118342="" class="virtual-scroll-container user-prompt-container" data-turn-role="User">
+      // <ms-text-chunk _ngcontent-ng-c66683564="" _nghost-ng-c3631226313="" class="ng-star-inserted">
+      function_result_selector: ['ms-text-chunk.ng-star-inserted'],
     },
-    {
-      urlPattern: 'gemini',
-      config: {
-        // targetSelectors: ['code-block'],
-        // streamingContainerSelectors: ['.code-block'],
-        targetSelectors: ['pre'],
-        streamingContainerSelectors: ['pre'],
-        function_result_selector: ['div.query-content'],
-      },
+  },
+  {
+    urlPattern: 'perplexity',
+    config: {
+      targetSelectors: ['pre'],
+      streamingContainerSelectors: ['.pre'],
+      function_result_selector: ['div.group\\/query', '.group\\/query', 'div[class*="group/query"]'],
     },
-    {
-      urlPattern: 'grok.com',
-      config: {
-        targetSelectors: ['code'],
-        streamingContainerSelectors: ['code'],
-        function_result_selector: ['div.relative.items-end'],
-      },
+  },
+  {
+    urlPattern: 'gemini',
+    config: {
+      // targetSelectors: ['code-block'],
+      // streamingContainerSelectors: ['.code-block'],
+      targetSelectors: ['pre'],
+      streamingContainerSelectors: ['pre'],
+      function_result_selector: ['div.query-content'],
     },
-    {
-      urlPattern: 'openrouter.ai',
-      config: {
-        targetSelectors: ['pre'],
-        streamingContainerSelectors: ['pre'],
-        // <div data-testid="user-message" class="group my-2 flex w-full flex-col gap-2 md:my-0 slide-in-from-right-12 justify-end items-end">
-        // <div class="relative group/text-item grid w-full ph-no-capture justify-items-end" data-dd-privacy="hidden"><div class="py-3 px-4 font-normal relative transition-colors border rounded-lg border-transparent rounded-tr-none bg-[var(--bubble-color,#3b82f6)] text-[var(--bubble-text-color,#ffffff)] col-start-1 row-start-1"><div class="min-w-0 w-full [&amp;&gt;ol]:mb-4 [&amp;&gt;ul]:mb-4 [&amp;&gt;*:last-child]:mb-0 [&amp;_li&gt;p]:mb-0">
-
-        function_result_selector: [
-          // 'div.min-w-0.w-full.overflow-hidden',
-          // 'div.group.my-2.flex.w-full.flex-col.gap-2.md:my-0.slide-in-from-right-12.justify-end.items-end',
-          'div[data-testid="user-message"]',
-          // 'div.relative.group/text-item.grid.w-full.ph-no-capture.justify-items-end[data-dd-privacy="hidden"]'
-          // 'div.flex.max-w-full.flex-col.relative.overflow-auto.gap-1.items-end',
-          // 'div.flex',
-          // 'div.flex.items-end',
-        ],
-      },
+  },
+  {
+    urlPattern: 'grok.com',
+    config: {
+      targetSelectors: ['code'],
+      streamingContainerSelectors: ['code'],
+      function_result_selector: ['div.relative.items-end'],
     },
-    {
-      urlPattern: 'chatgpt.com',
-      config: {
-        targetSelectors: ['pre'],
-        streamingContainerSelectors: ['pre'],
-        function_result_selector: ['div[data-message-author-role="user"]'],
-      },
+  },
+  {
+    urlPattern: 'openrouter.ai',
+    config: {
+      targetSelectors: ['pre'],
+      streamingContainerSelectors: ['pre'],
+      function_result_selector: ['div[data-testid="user-message"]'],
     },
-    {
-      urlPattern: 'chat.openai.com',
-      config: {
-        targetSelectors: ['pre'],
-        streamingContainerSelectors: ['pre'],
-        function_result_selector: ['div[data-message-author-role="user"]'],
-      },
+  },
+  {
+    urlPattern: 'chatgpt.com',
+    config: {
+      targetSelectors: ['pre'],
+      streamingContainerSelectors: ['pre'],
+      function_result_selector: ['div[data-message-author-role="user"]'],
     },
-    {
-      urlPattern: 'kagi.com',
-      config: {
-        targetSelectors: ['.content pre', '.codehilite', 'pre'],
-        streamingContainerSelectors: ['pre', '.content'],
-        function_result_selector: ['div[data-author="user"]'],
-      },
+  },
+  {
+    urlPattern: 'chat.openai.com',
+    config: {
+      targetSelectors: ['pre'],
+      streamingContainerSelectors: ['pre'],
+      function_result_selector: ['div[data-message-author-role="user"]'],
     },
-    {
-      urlPattern: 'chat.deepseek.com',
-      config: {
-        targetSelectors: ['pre', 'code'],
-        streamingContainerSelectors: ['pre', 'code'],
-        function_result_selector: ['div._9663006'],
-      },
+  },
+  {
+    urlPattern: 'kagi.com',
+    config: {
+      targetSelectors: ['.content pre', '.codehilite', 'pre'],
+      streamingContainerSelectors: ['pre', '.content'],
+      function_result_selector: ['div[data-author="user"]'],
     },
-    {
-      urlPattern: 't3.chat',
-      config: {
-        targetSelectors: ['pre'],
-        streamingContainerSelectors: ['pre'],
-        function_result_selector: ['div[aria-label="Your message"]'],
-      },
+  },
+  {
+    urlPattern: 'chat.deepseek.com',
+    config: {
+      targetSelectors: ['pre', 'code'],
+      streamingContainerSelectors: ['pre', 'code'],
+      function_result_selector: ['div._9663006'],
     },
-    {
-      urlPattern: 'chat.mistral.ai',
-      config: {
-        targetSelectors: ['pre'],
-        streamingContainerSelectors: ['pre'],
-        function_result_selector: ['div[data-message-part-type="answer"]', '.select-text'],
-      },
+  },
+  {
+    urlPattern: 't3.chat',
+    config: {
+      targetSelectors: ['pre'],
+      streamingContainerSelectors: ['pre'],
+      function_result_selector: ['div[aria-label="Your message"]'],
     },
-    {
-      urlPattern: 'github.com/copilot',
-      config: {
-        targetSelectors: ['pre'],
-        streamingContainerSelectors: ['pre'],
-        function_result_selector: ['.UserMessage-module__container--cAvvK', '.ChatMessage-module__userMessage--xvIFp'],
-      },
+  },
+  {
+    urlPattern: 'chat.mistral.ai',
+    config: {
+      targetSelectors: ['pre'],
+      streamingContainerSelectors: ['pre'],
+      function_result_selector: ['div[data-message-part-type="answer"]', '.select-text'],
     },
-    {
-      urlPattern: 'kimi.com',
-      config: {
-        targetSelectors: ['pre'],
-        streamingContainerSelectors: ['pre'],
-        function_result_selector: ['div[class*="user-content"]'],
-      },
+  },
+  {
+    urlPattern: 'github.com/copilot',
+    config: {
+      targetSelectors: ['pre'],
+      streamingContainerSelectors: ['pre'],
+      function_result_selector: ['.UserMessage-module__container--cAvvK', '.ChatMessage-module__userMessage--xvIFp'],
     },
-    {
-      urlPattern: 'chat.z.ai',
-      config: {
-        // targetSelectors: ['pre[id^="cm-hidden-pre-"]'],
-        // streamingContainerSelectors: ['pre[id^="cm-hidden-pre-"]'],
-        targetSelectors: ['pre'],
-        streamingContainerSelectors: ['pre'],
-        function_result_selector: ['div.chat-user'],
-        useCodeMirrorExtraction: true
-      },
+  },
+  {
+    urlPattern: 'kimi.com',
+    config: {
+      targetSelectors: ['pre'],
+      streamingContainerSelectors: ['pre'],
+      function_result_selector: ['div[class*="user-content"]'],
     },
-    {
-      urlPattern: 'chat.qwen.ai',
-      config: {
-        // Prioritize hidden pre elements from codemirror-accessor (clean content)
-        targetSelectors: ['pre[id^="cm-hidden-pre-"]', 'pre[data-cm-source]', 'pre', 'code'],
-        streamingContainerSelectors: ['pre', 'code'],
-        function_result_selector: ['.user-message-text-content', 'div.user-message-content'],
-        useCodeMirrorExtraction: true
-      },
+  },
+  {
+    urlPattern: 'chat.z.ai',
+    config: {
+      // targetSelectors: ['pre[id^="cm-hidden-pre-"]'],
+      // streamingContainerSelectors: ['pre[id^="cm-hidden-pre-"]'],
+      targetSelectors: ['pre'],
+      streamingContainerSelectors: ['pre'],
+      function_result_selector: ['div.chat-user'],
+      useCodeMirrorExtraction: true,
     },
-    // Add more website-specific configurations as needed
-    // Example:
-    // {
-    //   urlPattern: 'example.com',
-    //   config: {
-    //     targetSelectors: ['.custom-selector'],
-    //     streamingContainerSelectors: ['.custom-container']
-    //   }
-    // }
-  ];
+  },
+  {
+    urlPattern: 'chat.qwen.ai',
+    config: {
+      // Prioritize hidden pre elements from codemirror-accessor (clean content)
+      targetSelectors: ['pre[id^="cm-hidden-pre-"]', 'pre[data-cm-source]', 'pre', 'code'],
+      streamingContainerSelectors: ['pre', 'code'],
+      function_result_selector: ['.user-message-text-content', 'div.user-message-content'],
+      useCodeMirrorExtraction: true,
+    },
+  },
+  // Add more website-specific configurations as needed
+  // Example:
+  // {
+  //   urlPattern: 'example.com',
+  //   config: {
+  //     targetSelectors: ['.custom-selector'],
+  //     streamingContainerSelectors: ['.custom-container']
+  //   }
+  // }
+];
 
 /**
  * Gets the appropriate configuration based on the current URL
